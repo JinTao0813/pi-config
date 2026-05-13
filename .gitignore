@@ -1,0 +1,24 @@
+# macOS / editor
+.DS_Store
+*.swp
+*.swo
+
+# JS deps / build outputs
+node_modules/
+dist/
+build/
+*.tsbuildinfo
+
+# Pi secrets, sessions, caches, installed packages
+auth.json
+sessions/
+research/
+storage/
+npm/
+git/
+*.log
+
+# Env secrets
+.env
+.env.*
+!.env.example

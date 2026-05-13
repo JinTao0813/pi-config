@@ -1,0 +1,13 @@
+{
+  "packages": [
+    "/Users/winnee/dev/pi-config"
+  ],
+  "defaultProvider": "openai-codex",
+  "defaultModel": "gpt-5.5",
+  "defaultThinkingLevel": "low",
+  "enabledModels": [
+    "openai-codex/gpt-5.5",
+    "github-copilot/gemini-3.1-pro-preview",
+    "anthropic/claude-sonnet-4-6"
+  ]
+}
