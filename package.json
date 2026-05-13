@@ -2,7 +2,7 @@
   "name": "pi-config",
   "private": true,
   "version": "0.1.0",
-  "description": "Winnee's personal Pi coding agent configuration package.",
+  "description": "Jin Tao's personal Pi coding agent configuration package.",
   "keywords": ["pi-package"],
   "pi": {
     "extensions": ["./extensions"],
