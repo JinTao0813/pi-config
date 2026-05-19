@@ -10,6 +10,7 @@ build/
 *.tsbuildinfo
 __pycache__/
 *.pyc
+bin/
 
 # Pi secrets, local settings, sessions, caches, installed packages
 settings.json
