@@ -1,11 +1,12 @@
 import crypto from "node:crypto";
+import { getEnv } from "../../../lib/env";
 import type { AutoResearchConfig } from "../config";
 import { gradeEvidence } from "../engine/grader";
 import type { Evidence, SearchTask } from "../engine/schemas";
 
 export async function searchWeb(task: SearchTask, config: AutoResearchConfig, signal?: AbortSignal): Promise<Evidence[]> {
 	if (config.webProvider === "none") return [];
-	if (config.webProvider === "tavily" && process.env[config.tavilyApiKeyEnv]) return searchTavily(task, config, signal);
+	if (config.webProvider === "tavily" && getEnv(config.tavilyApiKeyEnv)) return searchTavily(task, config, signal);
 	return searchDuckDuckGo(task, signal);
 }
 
@@ -14,7 +15,7 @@ async function searchTavily(task: SearchTask, config: AutoResearchConfig, signal
 		method: "POST",
 		signal,
 		headers: { "content-type": "application/json" },
-		body: JSON.stringify({ api_key: process.env[config.tavilyApiKeyEnv], query: task.query, max_results: 5, search_depth: "basic" }),
+		body: JSON.stringify({ api_key: getEnv(config.tavilyApiKeyEnv), query: task.query, max_results: 5, search_depth: "basic" }),
 	});
 	if (!res.ok) throw new Error(`Tavily search failed: ${res.status}`);
 	const json = await res.json() as { results?: Array<{ title?: string; url?: string; content?: string }> };

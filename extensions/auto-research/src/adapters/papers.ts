@@ -1,10 +1,11 @@
 import crypto from "node:crypto";
+import { getEnv } from "../../../lib/env";
 import type { AutoResearchConfig } from "../config";
 import { gradeEvidence } from "../engine/grader";
 import type { Evidence, SearchTask } from "../engine/schemas";
 
 export async function searchPapers(task: SearchTask, config: AutoResearchConfig, signal?: AbortSignal): Promise<Evidence[]> {
-	const providers = (process.env.PI_AUTO_RESEARCH_PAPER_PROVIDERS || "openalex,semanticscholar,arxiv,crossref").split(",").map(s => s.trim()).filter(Boolean);
+	const providers = (getEnv("PI_AUTO_RESEARCH_PAPER_PROVIDERS") || "openalex,semanticscholar,arxiv,crossref").split(",").map(s => s.trim()).filter(Boolean);
 	const batches = await Promise.all(providers.map(async p => {
 		try {
 			if (p === "openalex") return await searchOpenAlex(task, signal);
@@ -18,7 +19,7 @@ export async function searchPapers(task: SearchTask, config: AutoResearchConfig,
 }
 
 async function searchOpenAlex(task: SearchTask, signal?: AbortSignal): Promise<Evidence[]> {
-	const mail = process.env.PI_RESEARCH_CONTACT_EMAIL;
+	const mail = getEnv("PI_RESEARCH_CONTACT_EMAIL");
 	const url = `https://api.openalex.org/works?search=${encodeURIComponent(task.query)}&per-page=5${mail ? `&mailto=${encodeURIComponent(mail)}` : ""}`;
 	const json = await fetchJson(url, signal);
 	return (json.results || []).map((w: any) => paperEvidence(task, {
@@ -35,7 +36,8 @@ async function searchOpenAlex(task: SearchTask, signal?: AbortSignal): Promise<E
 async function searchSemanticScholar(task: SearchTask, signal?: AbortSignal): Promise<Evidence[]> {
 	const fields = "title,abstract,year,authors,url,venue,citationCount,externalIds,openAccessPdf,tldr";
 	const headers: Record<string, string> = {};
-	if (process.env.SEMANTIC_SCHOLAR_API_KEY) headers["x-api-key"] = process.env.SEMANTIC_SCHOLAR_API_KEY;
+	const semanticScholarKey = getEnv("SEMANTIC_SCHOLAR_API_KEY");
+	if (semanticScholarKey) headers["x-api-key"] = semanticScholarKey;
 	const json = await fetchJson(`https://api.semanticscholar.org/graph/v1/paper/search?query=${encodeURIComponent(task.query)}&limit=5&fields=${fields}`, signal, headers);
 	return (json.data || []).map((p: any) => paperEvidence(task, {
 		title: p.title,
@@ -60,7 +62,7 @@ async function searchArxiv(task: SearchTask, signal?: AbortSignal): Promise<Evid
 }
 
 async function searchCrossref(task: SearchTask, signal?: AbortSignal): Promise<Evidence[]> {
-	const mail = process.env.PI_RESEARCH_CONTACT_EMAIL;
+	const mail = getEnv("PI_RESEARCH_CONTACT_EMAIL");
 	const url = `https://api.crossref.org/works?query=${encodeURIComponent(task.query)}&rows=5${mail ? `&mailto=${encodeURIComponent(mail)}` : ""}`;
 	const json = await fetchJson(url, signal);
 	return (json.message?.items || []).map((w: any) => paperEvidence(task, {

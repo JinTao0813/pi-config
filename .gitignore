@@ -3,13 +3,16 @@
 *.swp
 *.swo
 
-# JS deps / build outputs
+# deps / build outputs
 node_modules/
 dist/
 build/
 *.tsbuildinfo
+__pycache__/
+*.pyc
 
-# Pi secrets, sessions, caches, installed packages
+# Pi secrets, local settings, sessions, caches, installed packages
+settings.json
 auth.json
 sessions/
 research/
