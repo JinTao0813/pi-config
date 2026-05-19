@@ -6,7 +6,9 @@ Personal Pi coding agent setup. Intended to be cloned directly into:
 ~/.pi/agent
 ```
 
-Pi auto-loads extensions, skills, prompts, and themes from that directory.
+Pi auto-loads extensions, skills, prompts, themes, and global prompt files from that directory.
+
+`APPEND_SYSTEM.md` appends a short global style instruction without replacing Pi's default system prompt.
 
 ## What's included
 
@@ -19,7 +21,8 @@ Pi auto-loads extensions, skills, prompts, and themes from that directory.
 - `permission-guards` — safety guards for risky actions.
 - `token-ledger` — token/cache/skill/context audit utilities.
 - `undo-redo` — undo/redo support.
-- `usage` — Codex usage display command.
+- `usage` — `/usage` command for live Codex subscription usage via ChatGPT WHAM.
+- `usage-statusline` — live footer status for context + Codex session/week usage; polls ChatGPT WHAM and supports `/usage-refresh`.
 - `lib/env` — shared helper for reading extension env from `~/.pi/agent/.env`.
 
 ### Skills
@@ -67,6 +70,18 @@ Useful web search setting:
 ```bash
 TAVILY_API_KEY=tvly-...
 ```
+
+Useful Codex usage settings:
+
+```bash
+# Optional; defaults shown
+CODEX_USAGE_PROVIDER=openai-codex
+CODEX_USAGE_URL=https://chatgpt.com/backend-api/wham/usage
+PI_CODEX_USAGE_STATUS_TTL_SECONDS=300
+PI_CODEX_USAGE_STATUS_POLL_SECONDS=300
+```
+
+Codex usage reads live ChatGPT WHAM data using Pi `/login` auth. Run `/usage` for a detailed snapshot or `/usage-refresh` to force-refresh the footer.
 
 This repo's custom extensions read `~/.pi/agent/.env` directly. Model/provider auth is separate: use Pi's normal `/login`, `auth.json`, or exported env flow.
 
