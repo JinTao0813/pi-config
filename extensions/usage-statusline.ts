@@ -1,5 +1,7 @@
 import os from "node:os";
+import { isAbsolute, relative, resolve, sep } from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 
 type UsageWindowName = "session" | "week";
 type UsageStatus = "ok" | "estimated" | "unavailable" | "partial" | "stale";
@@ -34,9 +36,11 @@ const DEFAULT_WHAM_URL = "https://chatgpt.com/backend-api/wham/usage";
 const JWT_CLAIM_PATH = "https://api.openai.com/auth";
 
 let cache: { at: number; snapshot: CodexUsageSnapshot } | undefined;
+let currentSnapshot: CodexUsageSnapshot | undefined;
 let lastCtx: ExtensionContext | undefined;
 let pollTimer: NodeJS.Timeout | undefined;
 let refreshInFlight: Promise<void> | undefined;
+let requestFooterRender: (() => void) | undefined;
 
 const env = (name: string) => process.env[name]?.trim() || undefined;
 
@@ -54,6 +58,16 @@ function bar(percent: number, width = 10): string {
 	return "█".repeat(filled) + "░".repeat(width - filled);
 }
 
+function formatCwdForFooter(cwd: string, home?: string): string {
+	if (!home) return cwd;
+	const resolvedCwd = resolve(cwd);
+	const resolvedHome = resolve(home);
+	const relativeToHome = relative(resolvedHome, resolvedCwd);
+	const isInsideHome = relativeToHome === "" || (relativeToHome !== ".." && !relativeToHome.startsWith(`..${sep}`) && !isAbsolute(relativeToHome));
+	if (!isInsideHome) return cwd;
+	return relativeToHome === "" ? "~" : `~${sep}${relativeToHome}`;
+}
+
 function renderContext(ctx: ExtensionContext): string {
 	const usage = ctx.getContextUsage();
 	if (!usage) return "CTX unavailable";
@@ -62,6 +76,102 @@ function renderContext(ctx: ExtensionContext): string {
 	const window = usage.contextWindow ? `/${formatTokens(usage.contextWindow)}` : "";
 	const pct = usage.percent == null ? "?" : `${used.toFixed(1)}%`;
 	return `CTX [${bar(used)}] ${pct} used · ${left.toFixed(1)}% left · ${formatTokens(usage.tokens)}${window}`;
+}
+
+function renderBuiltinishFooter(ctx: ExtensionContext, theme: any, footerData: any, width: number): string[] {
+	let totalInput = 0;
+	let totalOutput = 0;
+	let totalCacheRead = 0;
+	let totalCacheWrite = 0;
+	let totalCost = 0;
+	let latestCacheHitRate: number | undefined;
+
+	for (const entry of ctx.sessionManager.getEntries()) {
+		if (entry.type === "message" && entry.message.role === "assistant") {
+			const usage = entry.message.usage;
+			totalInput += usage.input ?? 0;
+			totalOutput += usage.output ?? 0;
+			totalCacheRead += usage.cacheRead ?? 0;
+			totalCacheWrite += usage.cacheWrite ?? 0;
+			totalCost += usage.cost?.total ?? 0;
+			const latestPromptTokens = (usage.input ?? 0) + (usage.cacheRead ?? 0) + (usage.cacheWrite ?? 0);
+			latestCacheHitRate = latestPromptTokens > 0 ? ((usage.cacheRead ?? 0) / latestPromptTokens) * 100 : undefined;
+		}
+	}
+
+	let pwd = formatCwdForFooter(ctx.sessionManager.getCwd(), process.env.HOME || process.env.USERPROFILE);
+	const branch = footerData.getGitBranch?.();
+	if (branch) pwd = `${pwd} (${branch})`;
+	const sessionName = ctx.sessionManager.getSessionName?.();
+	if (sessionName) pwd = `${pwd} • ${sessionName}`;
+
+	const statsParts: string[] = [];
+	if (totalInput) statsParts.push(`↑${formatTokens(totalInput)}`);
+	if (totalOutput) statsParts.push(`↓${formatTokens(totalOutput)}`);
+	if (totalCacheRead) statsParts.push(`R${formatTokens(totalCacheRead)}`);
+	if (totalCacheWrite) statsParts.push(`W${formatTokens(totalCacheWrite)}`);
+	if ((totalCacheRead > 0 || totalCacheWrite > 0) && latestCacheHitRate !== undefined) statsParts.push(`CH${latestCacheHitRate.toFixed(1)}%`);
+	if (totalCost || ctx.model) statsParts.push(`$${totalCost.toFixed(3)}${ctx.model ? " (sub)" : ""}`);
+
+	const contextUsage = ctx.getContextUsage();
+	const contextWindow = contextUsage?.contextWindow ?? ctx.model?.contextWindow ?? 0;
+	const contextPercent = contextUsage?.percent == null ? "?" : `${contextUsage.percent.toFixed(1)}%`;
+	statsParts.push(`${contextPercent}/${formatTokens(contextWindow)} (auto)`);
+
+	let statsLeft = statsParts.join(" ");
+	if (visibleWidth(statsLeft) > width) statsLeft = truncateToWidth(statsLeft, width, "...");
+
+	const modelName = ctx.model?.id || "no-model";
+	let rightSide = modelName;
+	if (ctx.model?.reasoning) rightSide = `${modelName} • ${(ctx as any).state?.thinkingLevel || "medium"}`;
+
+	const statsLeftWidth = visibleWidth(statsLeft);
+	const rightSideWidth = visibleWidth(rightSide);
+	const padding = " ".repeat(Math.max(2, width - statsLeftWidth - rightSideWidth));
+	const statsLine = truncateToWidth(statsLeft + padding + rightSide, width, theme.fg("dim", "..."));
+
+	return [
+		truncateToWidth(theme.fg("dim", pwd), width, theme.fg("dim", "...")),
+		theme.fg("dim", statsLine),
+	];
+}
+
+function renderUsageLine(ctx: ExtensionContext, snapshot: CodexUsageSnapshot | undefined, name: UsageWindowName): string {
+	const model = ctx.model?.id ?? "model";
+	const label = name === "session" ? "5 hour session" : "weekly";
+	if (!snapshot) return `${model} ${label}: refreshing usage…`;
+	const window = snapshot.windows.find((w) => w.name === name);
+	if (!window?.usedPercent && window?.usedPercent !== 0) return `${model} ${label}: usage unavailable`;
+	const used = Math.round(window.usedPercent);
+	const left = Math.max(0, Math.round(100 - window.usedPercent));
+	const reset = window.resetAt ? ` · resets ${new Date(window.resetAt).toLocaleString()}` : "";
+	const stale = snapshot.warnings.some((w) => w.startsWith("stale:")) ? " stale" : "";
+	return `${model} ${label} [${bar(used)}] ${used}% used · ${left}% left${reset} · ${snapshot.dataSource}${stale}`;
+}
+
+function installCustomFooter(ctx: ExtensionContext) {
+	ctx.ui.setStatus("usage-context", undefined);
+	ctx.ui.setStatus("usage-session", undefined);
+	ctx.ui.setStatus("usage-weekly", undefined);
+	ctx.ui.setFooter((tui, theme, footerData) => {
+		requestFooterRender = () => tui.requestRender();
+		const unsub = footerData.onBranchChange?.(() => tui.requestRender());
+		return {
+			dispose() {
+				unsub?.();
+				if (requestFooterRender) requestFooterRender = undefined;
+			},
+			invalidate() { tui.requestRender(); },
+			render(width: number): string[] {
+				const activeCtx = lastCtx ?? ctx;
+				const lines = renderBuiltinishFooter(activeCtx, theme, footerData, width);
+				lines.push(theme.fg("dim", truncateToWidth(renderContext(activeCtx), width, theme.fg("dim", "..."))));
+				lines.push(theme.fg("dim", truncateToWidth(renderUsageLine(activeCtx, currentSnapshot, "session"), width, theme.fg("dim", "..."))));
+				lines.push(theme.fg("dim", truncateToWidth(renderUsageLine(activeCtx, currentSnapshot, "week"), width, theme.fg("dim", "..."))));
+				return lines;
+			},
+		};
+	});
 }
 
 async function fetchWhamUsage(ctx: ExtensionContext): Promise<CodexUsageSnapshot> {
@@ -139,41 +249,24 @@ function toFiniteNumber(value: unknown): number | undefined {
 	return undefined;
 }
 
-function renderUsageLine(ctx: ExtensionContext, snapshot: CodexUsageSnapshot, name: UsageWindowName): string {
-	const model = ctx.model?.id ?? "model";
-	const window = snapshot.windows.find((w) => w.name === name);
-	const label = name === "session" ? "5 hour session" : "weekly";
-	if (!window?.usedPercent && window?.usedPercent !== 0) return `${model} ${label}: usage unavailable`;
-	const used = Math.round(window.usedPercent);
-	const left = Math.max(0, Math.round(100 - window.usedPercent));
-	const reset = window.resetAt ? ` · resets ${new Date(window.resetAt).toLocaleString()}` : "";
-	const stale = snapshot.warnings.some((w) => w.startsWith("stale:")) ? " stale" : "";
-	return `${model} ${label} [${bar(used)}] ${used}% used · ${left}% left${reset} · ${snapshot.dataSource}${stale}`;
-}
-
-function setLoadingStatus(ctx: ExtensionContext) {
-	ctx.ui.setStatus("usage-context", ctx.ui.theme.fg("dim", renderContext(ctx)));
-	ctx.ui.setStatus("usage-session", ctx.ui.theme.fg("dim", `${ctx.model?.id ?? "model"} 5 hour session: refreshing usage…`));
-	ctx.ui.setStatus("usage-weekly", ctx.ui.theme.fg("dim", `${ctx.model?.id ?? "model"} weekly: refreshing usage…`));
-}
-
 async function updateStatus(ctx: ExtensionContext, refresh = false) {
 	lastCtx = ctx;
-	ctx.ui.setStatus("usage-context", ctx.ui.theme.fg("dim", renderContext(ctx)));
-	const snapshot = await getSnapshot(ctx, refresh);
-	ctx.ui.setStatus("usage-session", ctx.ui.theme.fg("dim", renderUsageLine(ctx, snapshot, "session")));
-	ctx.ui.setStatus("usage-weekly", ctx.ui.theme.fg("dim", renderUsageLine(ctx, snapshot, "week")));
+	currentSnapshot = await getSnapshot(ctx, refresh);
+	requestFooterRender?.();
 }
 
 function scheduleRefresh(ctx: ExtensionContext, refresh = false) {
 	lastCtx = ctx;
+	requestFooterRender?.();
 	if (refreshInFlight) return;
 	refreshInFlight = updateStatus(ctx, refresh).finally(() => { refreshInFlight = undefined; });
 }
 
 export default function usageStatusline(pi: ExtensionAPI) {
 	pi.on("session_start", (_event, ctx) => {
-		setLoadingStatus(ctx);
+		lastCtx = ctx;
+		currentSnapshot = cache?.snapshot;
+		installCustomFooter(ctx);
 		scheduleRefresh(ctx, true);
 		if (!pollTimer && POLL_MS > 0) pollTimer = setInterval(() => { if (lastCtx) scheduleRefresh(lastCtx, true); }, POLL_MS);
 	});
@@ -182,16 +275,17 @@ export default function usageStatusline(pi: ExtensionAPI) {
 	});
 	pi.on("turn_end", (_event, ctx) => scheduleRefresh(ctx, false));
 	pi.on("model_select", (_event, ctx) => scheduleRefresh(ctx, true));
-	pi.on("session_shutdown", () => {
+	pi.on("session_shutdown", (_event, ctx) => {
+		ctx.ui.setFooter(undefined);
 		if (pollTimer) clearInterval(pollTimer);
 		pollTimer = undefined;
 		lastCtx = undefined;
+		requestFooterRender = undefined;
 	});
 
 	pi.registerCommand("usage-refresh", {
 		description: "Force refresh Codex usage footer status",
 		handler: async (_args, ctx) => {
-			setLoadingStatus(ctx as unknown as ExtensionContext);
 			await updateStatus(ctx as unknown as ExtensionContext, true);
 			ctx.ui.notify("Usage status refreshed", "info");
 		},
