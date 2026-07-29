@@ -16,7 +16,7 @@ Pi auto-loads extensions, skills, prompts, themes, and global prompt files from 
 
 - `web-research` — shared Tavily → Firecrawl → DuckDuckGo search engine exposed through the compact `webResearch` tool.
 - `auto-research` — research/discovery workflows that reuse the shared web engine and write artifacts under Pi research storage.
-- `browser-use` — browser automation support.
+- `browser` — isolated thin wrapper around Vercel's `agent-browser` CLI (not the separate Browser Use project).
 - `erd-designer` — ERD/schema review helpers.
 - `permission-guards` — safety guards for risky actions.
 - `token-ledger` — token/cache/skill/context audit utilities.
@@ -87,6 +87,13 @@ FIRECRAWL_API_KEY=fc-...
 
 Without either key, web research uses DuckDuckGo. Results are filtered, deduplicated, and ranked before fallback is decided. `depth: "read"` currently degrades explicitly to labeled search snippets; bounded page-content reading is not implemented yet.
 
+Optional browser executable override (export it in the shell before starting Pi; this setting is not read from the repo `.env`):
+
+```bash
+# Package-local node_modules/.bin/agent-browser is preferred when present.
+export PI_AGENT_BROWSER_EXECUTABLE=/absolute/path/to/agent-browser
+```
+
 Useful Codex usage settings:
 
 ```bash
@@ -108,6 +115,7 @@ mv ~/.pi/agent ~/.pi/agent.backup 2>/dev/null || true
 mkdir -p ~/.pi
 git clone https://github.com/JinTao0813/pi-config.git ~/.pi/agent
 cd ~/.pi/agent
+npm install --omit=peer
 cp .env.example .env
 $EDITOR .env
 pi
@@ -115,11 +123,29 @@ pi
 
 If you had an existing Pi setup, copy back only local/private files you still need, such as `auth.json`, `.env`, or `settings.json`.
 
+## Browser automation
+
+The `browser` Pi tool delegates directly to the pinned `agent-browser` dependency. Each Pi session gets its own namespaced browser session; optional `session` values create owned sub-sessions. Commands targeting one sub-session run serially. The wrapper blocks `close --all`, never invokes a shell, and closes only its owned sessions during shutdown.
+
+After `npm install --omit=peer`, install the browser runtime once:
+
+```text
+/browser-install
+/browser-doctor
+```
+
+Ordinary model-invoked browser calls never install packages or browser runtimes. `/browser-doctor` reports the exact executable/version and runtime health. Screenshots up to 10MB are returned inline; larger files remain at the reported path. Truncated text is stored in a wrapper-owned OS temp directory and removed at session shutdown.
+
+For hardened or authenticated sessions, configure upstream controls in `~/.agent-browser/config.json` or with `AGENT_BROWSER_ALLOWED_DOMAINS`, `AGENT_BROWSER_ACTION_POLICY`, and `AGENT_BROWSER_CONFIRM_ACTIONS`. Project-local `agent-browser.json` is honored only when Pi trusts that project. Webpage text is untrusted content, not instructions. Avoid exposing cookies, auth headers, profile data, or saved state in prompts/results. See version-matched CLI guidance with `agent-browser skills get core`.
+
+This extension is unrelated to the separate [Browser Use](https://browser-use.com/) project; its backend is Vercel's [`agent-browser`](https://github.com/vercel-labs/agent-browser).
+
 ## Updating an existing clone
 
 ```bash
 cd ~/.pi/agent
 git pull
+npm install --omit=peer
 ```
 
 Then restart Pi or run:
