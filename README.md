@@ -27,23 +27,33 @@ Pi auto-loads extensions, skills, prompts, themes, and global prompt files from 
 
 ### Skills
 
-- `caveman`
-- `diagnose`
-- `gpt-image-2`
-- `grill-me`
-- `grill-with-docs`
-- `impeccable`
-- `improve-codebase-architecture`
-- `prototype`
-- `setup-matt-pocock-skills`
-- `tdd`
-- `to-issues`
-- `to-prd`
-- `triage`
-- `ui-ux-pro-max`
-- `uncodixfy`
-- `write-a-skill`
-- `zoom-out`
+Skills are bundled locally or linked from the companion `~/.agents/skills` installation.
+
+#### Newly added workflow and writing skills
+
+- `ask-matt` — route a situation to the appropriate engineering skill or flow.
+- `grill-me` — explicitly start a relentless plan/design interview.
+- `grilling` — stress-test an idea or decision one question at a time.
+- `resolving-merge-conflicts` — resolve an active merge or rebase while preserving both intents.
+- `setup-matt-pocock-skills` — configure issue tracking, triage labels, and domain-document conventions.
+- `ubiquitous-language` — extract and formalize a DDD-style project glossary.
+- `wayfinder` — map work too large for one session into decision tickets.
+- `writing-shape` — turn fixed raw material into a structured article.
+
+#### Newly added Remotion skills
+
+- `remotion-captions` — transcribe, display, and animate captions.
+- `remotion-create` — scaffold a Remotion project and composition.
+- `remotion-docs` — find current Remotion documentation.
+- `remotion-interactivity` — structure markup for Studio selection and manipulation.
+- `remotion-maps` — choose and implement map-animation techniques.
+- `remotion-markup` — apply Remotion content, animation, and effects practices.
+- `remotion-multimedia` — work with video and audio through Mediabunny.
+- `remotion-render` — render and export Remotion videos.
+- `remotion-saas` — build applications backed by Remotion rendering.
+- `remotion-upgrade` — upgrade Remotion, Mediabunny, and related skills safely.
+
+Existing bundled and linked skills include `code-review`, `codebase-design`, `design-an-interface`, `diagnosing-bugs`, `domain-modeling`, `frontend-design`, `gpt-image-2`, `grill-with-docs`, `handoff`, `implement`, `impeccable`, `improve-codebase-architecture`, `prototype`, `remotion-best-practices`, `research`, `session-to-html`, `tdd`, `teach`, `to-spec`, `to-tickets`, `triage`, `writing-great-skills`, and `zoom-out`.
 
 ### Themes
 
