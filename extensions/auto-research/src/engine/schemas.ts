@@ -36,7 +36,7 @@ export interface Evidence {
 	confidence: "low" | "medium" | "high";
 	tags: string[];
 	canonicalKey?: string;
-	provider?: "memory" | "openalex" | "semantic_scholar" | "arxiv" | "crossref" | "pubmed" | "tavily" | "duckduckgo";
+	provider?: "memory" | "openalex" | "semantic_scholar" | "arxiv" | "crossref" | "pubmed" | "tavily" | "firecrawl" | "duckduckgo";
 	publishedAt?: string;
 	sourceUpdatedAt?: string;
 	citationCount?: number;

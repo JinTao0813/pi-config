@@ -12,6 +12,7 @@ import { ResearchMemory, memoryHasEnough } from "../memory/store";
 import { renderReport, renderSummary } from "../output/markdown";
 
 export async function runResearch(mode: ResearchMode, query: string, depth: Depth = "standard", signal?: AbortSignal, onProgress?: (msg: string) => void, options: { forceRefresh?: boolean } = {}): Promise<ResearchResult> {
+	signal?.throwIfAborted();
 	const config = loadConfig();
 	const memory = new ResearchMemory(config.artifactRoot);
 	const run = await createRun(config.artifactRoot, mode, query, depth);
@@ -26,22 +27,29 @@ export async function runResearch(mode: ResearchMode, query: string, depth: Dept
 
 		const evidence = [];
 		for (const task of plan.tasks) {
+			signal?.throwIfAborted();
 			onProgress?.(`Searching memory: ${task.id}`);
 			const remembered = await memory.search(task.query, config.maxSources);
 			let found = remembered;
 			if (options.forceRefresh || !memoryHasEnough(remembered)) {
 				onProgress?.(`Searching sources: ${task.id}`);
-				const papers = await searchPapers(task, config, signal).catch(() => []);
-				const web = await searchWeb(task, config, signal).catch(err => [{
-					id: `error-${task.id}`,
-					title: `Search failed: ${task.id}`,
-					sourceType: "web" as const,
-					snippet: String(err?.message || err),
-					retrievalQuery: task.query,
-					fetchedAt: new Date().toISOString(),
-					confidence: "low" as const,
-					tags: ["error"],
-				}]);
+				const papers = await searchPapers(task, config, signal).catch(err => {
+					if (signal?.aborted) throw err;
+					return [];
+				});
+				const web = await searchWeb(task, config, signal).catch(err => {
+					if (signal?.aborted) throw err;
+					return [{
+						id: `error-${task.id}`,
+						title: `Search failed: ${task.id}`,
+						sourceType: "web" as const,
+						snippet: String(err?.message || err),
+						retrievalQuery: task.query,
+						fetchedAt: new Date().toISOString(),
+						confidence: "low" as const,
+						tags: ["error"],
+					}];
+				});
 				found = [...remembered, ...papers, ...web];
 			}
 			evidence.push(...found);

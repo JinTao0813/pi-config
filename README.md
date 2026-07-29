@@ -14,8 +14,8 @@ Pi auto-loads extensions, skills, prompts, themes, and global prompt files from 
 
 ### Extensions
 
-- `web-search` — `webResearch` tool using Tavily, with DuckDuckGo fallback.
-- `auto-research` — research/discovery tools that write artifacts under Pi research storage.
+- `web-research` — shared Tavily → Firecrawl → DuckDuckGo search engine exposed through the compact `webResearch` tool.
+- `auto-research` — research/discovery workflows that reuse the shared web engine and write artifacts under Pi research storage.
 - `browser-use` — browser automation support.
 - `erd-designer` — ERD/schema review helpers.
 - `permission-guards` — safety guards for risky actions.
@@ -23,7 +23,7 @@ Pi auto-loads extensions, skills, prompts, themes, and global prompt files from 
 - `undo-redo` — undo/redo support.
 - `usage` — `/usage` command for live Codex subscription usage via ChatGPT WHAM.
 - `usage-statusline` — live footer status for context + Codex session/week usage; polls ChatGPT WHAM and supports `/usage-refresh`.
-- `lib/env` — shared helper for reading extension env from `~/.pi/agent/.env`.
+- `shared/env` — shared helper for reading extension env from `~/.pi/agent/.env`.
 
 ### Skills
 
@@ -75,11 +75,17 @@ cp .env.example .env
 $EDITOR .env
 ```
 
-Useful web search setting:
+Optional web-research providers:
 
 ```bash
+# Tavily is tried first when configured.
 TAVILY_API_KEY=tvly-...
+
+# Firecrawl is tried second when configured.
+FIRECRAWL_API_KEY=fc-...
 ```
+
+Without either key, web research uses DuckDuckGo. Results are filtered, deduplicated, and ranked before fallback is decided. `depth: "read"` currently degrades explicitly to labeled search snippets; bounded page-content reading is not implemented yet.
 
 Useful Codex usage settings:
 

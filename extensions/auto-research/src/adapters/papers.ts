@@ -1,5 +1,5 @@
 import crypto from "node:crypto";
-import { getEnv } from "../../../lib/env";
+import { getEnv } from "../../../shared/env";
 import type { AutoResearchConfig } from "../config";
 import { gradeEvidence } from "../engine/grader";
 import type { Evidence, SearchTask } from "../engine/schemas";

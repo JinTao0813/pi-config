@@ -1,11 +1,10 @@
 import path from "node:path";
-import { getEnv } from "../../lib/env";
+import { getEnv } from "../../shared/env";
 
 export interface AutoResearchConfig {
 	artifactRoot: string;
 	maxSources: number;
-	webProvider: "tavily" | "duckduckgo" | "none";
-	tavilyApiKeyEnv: string;
+	webSearchEnabled: boolean;
 }
 
 export function loadConfig(cwd = process.cwd()): AutoResearchConfig {
@@ -13,7 +12,6 @@ export function loadConfig(cwd = process.cwd()): AutoResearchConfig {
 	return {
 		artifactRoot: getEnv("PI_AUTO_RESEARCH_DIR") || path.join(agentDir, "research"),
 		maxSources: Number(getEnv("PI_AUTO_RESEARCH_MAX_SOURCES") || 8),
-		webProvider: (getEnv("PI_AUTO_RESEARCH_WEB_PROVIDER") as AutoResearchConfig["webProvider"]) || (getEnv("TAVILY_API_KEY") ? "tavily" : "duckduckgo"),
-		tavilyApiKeyEnv: getEnv("PI_AUTO_RESEARCH_TAVILY_ENV") || "TAVILY_API_KEY",
+		webSearchEnabled: getEnv("PI_AUTO_RESEARCH_WEB_PROVIDER") !== "none",
 	};
 }

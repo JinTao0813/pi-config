@@ -3,6 +3,9 @@
   "private": true,
   "version": "0.1.0",
   "description": "Jin Tao's personal Pi coding agent configuration package.",
+  "scripts": {
+    "test": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --test tests/web-research/*.test.ts"
+  },
   "keywords": ["pi-package"],
   "pi": {
     "extensions": ["./extensions"],
