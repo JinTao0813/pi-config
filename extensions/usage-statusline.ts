@@ -28,7 +28,18 @@ type WhamRaw = {
 	rate_limit?: { primary_window?: WhamWindowRaw; secondary_window?: WhamWindowRaw };
 	credits?: { has_credits?: boolean; unlimited?: boolean; balance?: string };
 };
-type WhamWindowRaw = { used_percent?: unknown; reset_after_seconds?: unknown };
+type WhamWindowRaw = {
+	used_percent?: unknown;
+	reset_after_seconds?: unknown;
+	limit_window_seconds?: unknown;
+	reset_at?: unknown;
+};
+type NormalizedRateWindow = {
+	usedPercent: number;
+	resetAfterSeconds?: number;
+	limitWindowSeconds?: number;
+	resetAt?: number;
+};
 
 const CACHE_TTL_MS = Number(process.env.PI_CODEX_USAGE_STATUS_TTL_SECONDS ?? process.env.PI_CODEX_USAGE_CACHE_TTL_SECONDS ?? 300) * 1000;
 const POLL_MS = Number(process.env.PI_CODEX_USAGE_STATUS_POLL_SECONDS ?? 300) * 1000;
@@ -41,6 +52,7 @@ let lastCtx: ExtensionContext | undefined;
 let pollTimer: NodeJS.Timeout | undefined;
 let refreshInFlight: Promise<void> | undefined;
 let requestFooterRender: (() => void) | undefined;
+let currentThinkingLevel: string | undefined;
 
 const env = (name: string) => process.env[name]?.trim() || undefined;
 
@@ -123,7 +135,7 @@ function renderBuiltinishFooter(ctx: ExtensionContext, theme: any, footerData: a
 
 	const modelName = ctx.model?.id || "no-model";
 	let rightSide = modelName;
-	if (ctx.model?.reasoning) rightSide = `${modelName} • ${(ctx as any).state?.thinkingLevel || "medium"}`;
+	if (ctx.model?.reasoning) rightSide = `${modelName} • ${currentThinkingLevel ?? "?"}`;
 
 	const statsLeftWidth = visibleWidth(statsLeft);
 	const rightSideWidth = visibleWidth(rightSide);
@@ -136,17 +148,24 @@ function renderBuiltinishFooter(ctx: ExtensionContext, theme: any, footerData: a
 	];
 }
 
-function renderUsageLine(ctx: ExtensionContext, snapshot: CodexUsageSnapshot | undefined, name: UsageWindowName): string {
+export function renderUsageLines(ctx: ExtensionContext, snapshot: CodexUsageSnapshot | undefined): string[] {
 	const model = ctx.model?.id ?? "model";
-	const label = name === "session" ? "5 hour session" : "weekly";
-	if (!snapshot) return `${model} ${label}: refreshing usage…`;
-	const window = snapshot.windows.find((w) => w.name === name);
-	if (!window?.usedPercent && window?.usedPercent !== 0) return `${model} ${label}: usage unavailable`;
-	const used = Math.round(window.usedPercent);
-	const left = Math.max(0, Math.round(100 - window.usedPercent));
-	const reset = window.resetAt ? ` · resets ${new Date(window.resetAt).toLocaleString()}` : "";
+	const names: UsageWindowName[] = ["session", "week"];
+	if (!snapshot) return names.map((name) => `${model} ${name === "session" ? "5 hour session" : "weekly"}: refreshing usage…`);
 	const stale = snapshot.warnings.some((w) => w.startsWith("stale:")) ? " stale" : "";
-	return `${model} ${label} [${bar(used)}] ${used}% used · ${left}% left${reset} · ${snapshot.dataSource}${stale}`;
+	return names.map((name) => {
+		const label = name === "session" ? "5 hour session" : "weekly";
+		const window = snapshot.windows.find((candidate) => candidate.name === name);
+		if (!window) {
+			const unavailable = snapshot.dataSource === "chatgpt-wham" ? "not reported by API" : "usage unavailable";
+			return `${model} ${label}: ${unavailable}`;
+		}
+		if (window.usedPercent == null) return `${model} ${label}: usage unavailable`;
+		const used = Math.round(window.usedPercent);
+		const left = Math.max(0, Math.round(100 - window.usedPercent));
+		const reset = window.resetAt ? ` · resets ${new Date(window.resetAt).toLocaleString()}` : "";
+		return `${model} ${label} [${bar(used)}] ${used}% used · ${left}% left${reset} · ${snapshot.dataSource}${stale}`;
+	});
 }
 
 function installCustomFooter(ctx: ExtensionContext) {
@@ -166,8 +185,9 @@ function installCustomFooter(ctx: ExtensionContext) {
 				const activeCtx = lastCtx ?? ctx;
 				const lines = renderBuiltinishFooter(activeCtx, theme, footerData, width);
 				lines.push(theme.fg("dim", truncateToWidth(renderContext(activeCtx), width, theme.fg("dim", "..."))));
-				lines.push(theme.fg("dim", truncateToWidth(renderUsageLine(activeCtx, currentSnapshot, "session"), width, theme.fg("dim", "..."))));
-				lines.push(theme.fg("dim", truncateToWidth(renderUsageLine(activeCtx, currentSnapshot, "week"), width, theme.fg("dim", "..."))));
+				for (const usageLine of renderUsageLines(activeCtx, currentSnapshot)) {
+					lines.push(theme.fg("dim", truncateToWidth(usageLine, width, theme.fg("dim", "..."))));
+				}
 				return lines;
 			},
 		};
@@ -209,13 +229,13 @@ async function getSnapshot(ctx: ExtensionContext, refresh = false): Promise<Code
 	}
 }
 
-function normalizeWhamSnapshot(raw: WhamRaw): CodexUsageSnapshot {
+export function normalizeWhamSnapshot(raw: WhamRaw): CodexUsageSnapshot {
 	const now = new Date();
 	const windows: UsageWindow[] = [];
 	const primary = normalizeRateWindow(raw.rate_limit?.primary_window);
 	const secondary = normalizeRateWindow(raw.rate_limit?.secondary_window);
-	if (primary) windows.push(rateToWindow("session", primary.usedPercent, primary.resetAfterSeconds, now));
-	if (secondary) windows.push(rateToWindow("week", secondary.usedPercent, secondary.resetAfterSeconds, now));
+	if (primary) windows.push(rateToWindow(classifyWindow(primary, "session"), primary, now));
+	if (secondary) windows.push(rateToWindow(classifyWindow(secondary, "week"), secondary, now));
 	return {
 		planName: raw.plan_type,
 		dataSource: "chatgpt-wham",
@@ -226,18 +246,29 @@ function normalizeWhamSnapshot(raw: WhamRaw): CodexUsageSnapshot {
 	};
 }
 
-function rateToWindow(name: UsageWindowName, usedPercent: number, resetAfterSeconds: number | undefined, now: Date): UsageWindow {
-	return {
-		name,
-		usedPercent,
-		resetAt: resetAfterSeconds === undefined ? undefined : new Date(now.getTime() + resetAfterSeconds * 1000).toISOString(),
-		status: "ok",
-	};
+function classifyWindow(window: NormalizedRateWindow, fallback: UsageWindowName): UsageWindowName {
+	if (window.limitWindowSeconds === undefined) return fallback;
+	return window.limitWindowSeconds >= 3 * 24 * 60 * 60 ? "week" : "session";
 }
 
-function normalizeRateWindow(raw: WhamWindowRaw | undefined): { usedPercent: number; resetAfterSeconds?: number } | undefined {
+function rateToWindow(name: UsageWindowName, window: NormalizedRateWindow, now: Date): UsageWindow {
+	const resetAt = window.resetAt !== undefined
+		? new Date(window.resetAt * 1000).toISOString()
+		: window.resetAfterSeconds === undefined
+			? undefined
+			: new Date(now.getTime() + window.resetAfterSeconds * 1000).toISOString();
+	return { name, usedPercent: window.usedPercent, resetAt, status: "ok" };
+}
+
+function normalizeRateWindow(raw: WhamWindowRaw | undefined): NormalizedRateWindow | undefined {
 	const usedPercent = toFiniteNumber(raw?.used_percent);
-	return usedPercent === undefined ? undefined : { usedPercent, resetAfterSeconds: toFiniteNumber(raw?.reset_after_seconds) };
+	if (usedPercent === undefined) return undefined;
+	return {
+		usedPercent,
+		resetAfterSeconds: toFiniteNumber(raw?.reset_after_seconds),
+		limitWindowSeconds: toFiniteNumber(raw?.limit_window_seconds),
+		resetAt: toFiniteNumber(raw?.reset_at),
+	};
 }
 
 function toFiniteNumber(value: unknown): number | undefined {
@@ -265,6 +296,7 @@ function scheduleRefresh(ctx: ExtensionContext, refresh = false) {
 export default function usageStatusline(pi: ExtensionAPI) {
 	pi.on("session_start", (_event, ctx) => {
 		lastCtx = ctx;
+		currentThinkingLevel = getThinkingLevel(ctx);
 		currentSnapshot = cache?.snapshot;
 		installCustomFooter(ctx);
 		scheduleRefresh(ctx, true);
@@ -275,11 +307,17 @@ export default function usageStatusline(pi: ExtensionAPI) {
 	});
 	pi.on("turn_end", (_event, ctx) => scheduleRefresh(ctx, false));
 	pi.on("model_select", (_event, ctx) => scheduleRefresh(ctx, true));
+	pi.on("thinking_level_select", (event, ctx) => {
+		lastCtx = ctx;
+		currentThinkingLevel = event.level;
+		requestFooterRender?.();
+	});
 	pi.on("session_shutdown", (_event, ctx) => {
 		ctx.ui.setFooter(undefined);
 		if (pollTimer) clearInterval(pollTimer);
 		pollTimer = undefined;
 		lastCtx = undefined;
+		currentThinkingLevel = undefined;
 		requestFooterRender = undefined;
 	});
 
@@ -290,6 +328,15 @@ export default function usageStatusline(pi: ExtensionAPI) {
 			ctx.ui.notify("Usage status refreshed", "info");
 		},
 	});
+}
+
+export function getThinkingLevel(ctx: ExtensionContext): string | undefined {
+	const branch = ctx.sessionManager.getBranch();
+	for (let i = branch.length - 1; i >= 0; i--) {
+		const entry = branch[i];
+		if (entry.type === "thinking_level_change") return entry.thinkingLevel;
+	}
+	return undefined;
 }
 
 function applyChatGPTHeaders(url: string, token: string, headers: Record<string, string>) {
