@@ -229,12 +229,21 @@ It displays working directory, branch, session name, aggregate input/output/cach
 
 Bundled highlights:
 
+- `frontend-design` — Anthropic's distinctive, brief-led frontend design guidance for building or reshaping interfaces.
+- `gpt-taste` — Leonxlnx's strongly opinionated GPT/Codex frontend direction for high-variance layouts and GSAP-heavy motion.
 - `imagegen` — OpenAI Codex's public ImageGen skill, mirrored under its Apache-2.0 license. It replaced the older local `gpt-image-2` skill. See [the update and provenance guide](docs/updating-imagegen.md).
-- `impeccable` — frontend design, critique, hardening, optimization, responsive/theming work, and live UI iteration.
+- `impeccable` — manual-only frontend critique, audit, hardening, and optimization toolkit.
 - `motion` — Motion/CSS animation practices, docs search, spring generation, performance audits, and transition previews.
 - `session-to-html` — packages planning or discussion context into a polished standalone HTML document.
 
 Other skills are either bundled locally or linked from the companion `~/.agents/skills` installation. Pi discovers them from `skills/` at startup.
+
+### Frontend skill routing and provenance
+
+- `frontend-design` is vendored from Anthropic's [`claude-code/plugins/frontend-design`](https://github.com/anthropics/claude-code/tree/main/plugins/frontend-design/skills/frontend-design) skill. Its upstream terms are retained in `skills/frontend-design/LICENSE.txt`.
+- `gpt-taste` is vendored from Leonxlnx's [`taste-skill`](https://github.com/Leonxlnx/taste-skill/tree/main/skills/gpt-tasteskill) repository under the MIT license retained in `skills/gpt-taste/LICENSE.txt`.
+- Both remain available for automatic model routing. `frontend-design` is the broad design lead; `gpt-taste` is best suited to deliberately expressive, motion-heavy work.
+- `impeccable` sets `disable-model-invocation: true`. Invoke it explicitly for a second-pass review with `/skill:impeccable critique <target>` or `/skill:impeccable audit <target>`.
 
 ### ImageGen provenance
 

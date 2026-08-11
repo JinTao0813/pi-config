@@ -22,6 +22,9 @@ npm/
 git/
 *.log
 
+# Private local skill; never stage, commit, or push
+/skills/job-application/
+
 # Env secrets
 .env
 .env.*
