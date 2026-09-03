@@ -29,7 +29,7 @@ $EDITOR .env
 pi
 ```
 
-If replacing an existing setup, copy back only private files you still need, such as `.env`, `auth.json`, or `settings.json`. Do not commit them.
+If replacing an existing setup, copy back only private files you still need, such as `.env`, `auth.json`, or `settings.json`. Do not commit them. Pi-generated trust, model cache, run history, mission, session, and research files are also excluded from Git.
 
 ### Install externally managed skills
 
@@ -91,6 +91,28 @@ Install and diagnose the browser runtime after `npm install`:
 ```
 
 For authenticated or hardened sessions, configure upstream policy in `~/.agent-browser/config.json` or with `AGENT_BROWSER_ALLOWED_DOMAINS`, `AGENT_BROWSER_ACTION_POLICY`, and `AGENT_BROWSER_CONFIRM_ACTIONS`. Project-local `agent-browser.json` is honored only when Pi trusts the project.
+
+### Deterministic PDF reading — `extensions/pdf-reader/`
+
+**Surface:** `read_pdf` tool and `/pdf-reader-install`.
+
+**Direction:** use a typed, bounded extension tool rather than repeatedly assembling PDF shell commands.
+
+- Runs a standalone Python extractor with `pypdf` pinned by version and wheel SHA-256.
+- Normalizes extracted text to UTF-8/NFC, LF line endings, stable page markers, no NULs, and no trailing horizontal whitespace.
+- Supports 1-based page ranges and plain or layout-preserving extraction.
+- Limits each call to 100 pages and truncates model-facing output to Pi's standard 2,000-line/50 KB boundary.
+- Keeps full selected-range output in a session-owned temporary file only when truncation occurs.
+- Rejects mismatched `pypdf` versions so extraction behavior cannot silently drift.
+- Does not pretend to provide OCR, password decryption, image extraction, or table reconstruction.
+
+After cloning, install its isolated Python runtime once:
+
+```text
+/pdf-reader-install
+```
+
+See [`extensions/pdf-reader/README.md`](extensions/pdf-reader/README.md) for standalone script usage and determinism guarantees.
 
 ### Current-web search — `extensions/web-research/`
 
@@ -215,7 +237,7 @@ The ChatGPT WHAM endpoint is an internal, undocumented interface and can change 
 
 **Direction:** combine repository/model context and subscription capacity in one low-noise footer.
 
-It displays working directory, branch, session name, aggregate input/output/cache/cost data, model and thinking level, context-window use, and five-hour/weekly usage. WHAM data is cached and polled; stale cached data is labeled when refresh fails. The extension tears down its timer and footer on session shutdown.
+It displays working directory, branch, session name, aggregate input/output/cache/cost data, model and thinking level, context-window use, five-hour/weekly GPT usage, and Tavily/Firecrawl credit usage. All remote usage data is fetched in parallel, cached, and polled; stale cached data is labeled when refresh fails. Tavily and Firecrawl credentials come from `TAVILY_API_KEY` and `FIRECRAWL_API_KEY` through the shared environment loader. The extension tears down its timer and footer on session shutdown.
 
 ### Shared environment loader — `extensions/shared/env.ts`
 
@@ -225,16 +247,27 @@ It displays working directory, branch, session name, aggregate input/output/cach
 
 **Direction:** keep extension secrets in `~/.pi/agent/.env` without coupling model/provider authentication to that file. Exported process values win; the local file is read once and cached. Pi model auth still uses `/login`, `auth.json`, or the normal provider environment flow.
 
+### Herdr pane state
+
+When Pi starts inside Herdr, Herdr installs `extensions/herdr-agent-state.ts`. It reports the active Pi session and the pane's `working`, `blocked`, or `idle` state over Herdr's local socket. Herdr owns and overwrites this generated file, so Git ignores it.
+
+## Custom agents
+
+- `agents/risk-reviewer.md` defines a read-only reviewer focused on concrete correctness, security, reliability, performance, and data-integrity defects in a pinned Git diff.
+
 ## Skills
 
 Bundled highlights:
 
 - `frontend-design` — Anthropic's distinctive, brief-led frontend design guidance for building or reshaping interfaces.
 - `gpt-taste` — Leonxlnx's strongly opinionated GPT/Codex frontend direction for high-variance layouts and GSAP-heavy motion.
-- `imagegen` — OpenAI Codex's public ImageGen skill, mirrored under its Apache-2.0 license. It replaced the older local `gpt-image-2` skill. See [the update and provenance guide](docs/updating-imagegen.md).
-- `impeccable` — manual-only frontend critique, audit, hardening, and optimization toolkit.
-- `motion` — Motion/CSS animation practices, docs search, spring generation, performance audits, and transition previews.
-- `session-to-html` — packages planning or discussion context into a polished standalone HTML document.
+- `find-docs` retrieves current library documentation through the Context7 CLI.
+- `imagegen` mirrors OpenAI Codex's public ImageGen skill under its Apache-2.0 license. It replaced the older local `gpt-image-2` skill. See [the update and provenance guide](docs/updating-imagegen.md).
+- `impeccable` is a manual-only frontend critique, audit, hardening, and optimization toolkit.
+- `motion` covers Motion and CSS animation practices, docs search, spring generation, performance audits, and transition previews.
+- `session-to-html` packages planning or discussion context into a polished standalone HTML document.
+- `submit-pr` pushes a reviewed branch and creates or updates its pull request when invoked explicitly.
+- `unslop` removes stock AI phrasing from generated writing.
 
 Other skills are either bundled locally or linked from the companion `~/.agents/skills` installation. Pi discovers them from `skills/` at startup.
 
@@ -303,6 +336,11 @@ CODEX_USAGE_TIMEOUT_MS=15000
 PI_CODEX_USAGE_STATUS_TTL_SECONDS=300
 PI_CODEX_USAGE_STATUS_POLL_SECONDS=300
 
+# Optional Tavily and Firecrawl usage overrides.
+TAVILY_USAGE_URL=https://api.tavily.com/usage
+FIRECRAWL_USAGE_URL=https://api.firecrawl.dev/v2/team/credit-usage
+PI_EXTERNAL_USAGE_TIMEOUT_MS=15000
+
 # Optional fallback usage API.
 PI_CODEX_USAGE_ENDPOINT=https://example.com/usage
 PI_CODEX_USAGE_API_KEY=...
@@ -317,7 +355,7 @@ Codex usage uses Pi `/login` auth by default. Do not copy model access tokens in
 npm test
 ```
 
-The test suite covers the browser wrapper's command/session boundaries and web-research normalization, fallback, cancellation, filtering, and provider adapters.
+The test suite covers browser command and session boundaries, deterministic PDF extraction, external usage normalization, and web-research provider behavior.
 
 Useful pre-commit checks:
 

@@ -7,6 +7,7 @@
 node_modules/
 dist/
 build/
+.venv/
 *.tsbuildinfo
 __pycache__/
 *.pyc
@@ -15,12 +16,21 @@ bin/
 # Pi secrets, local settings, sessions, caches, installed packages
 settings.json
 auth.json
+trust.json
+models-store.json
+run-history.jsonl
+missions/
 sessions/
 research/
 storage/
 npm/
 git/
 *.log
+
+# Local tool and launcher state
+.claude/settings.local.json
+.impeccable/config.local.json
+/extensions/herdr-agent-state.ts
 
 # Private local skill; never stage, commit, or push
 /skills/job-application/

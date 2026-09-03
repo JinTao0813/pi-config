@@ -4,7 +4,7 @@
   "version": "0.1.0",
   "description": "Jin Tao's personal Pi coding agent configuration package.",
   "scripts": {
-    "test": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --test tests/browser-use.test.ts tests/web-research/*.test.ts"
+    "test": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --test tests/browser-use.test.ts tests/pdf-reader.test.ts tests/usage-api.test.ts tests/web-research/*.test.ts"
   },
   "dependencies": {
     "agent-browser": "0.33.1"

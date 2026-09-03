@@ -2,6 +2,13 @@ import os from "node:os";
 import { isAbsolute, relative, resolve, sep } from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
+import { getEnv } from "./shared/env.ts";
+import {
+	normalizeFirecrawlUsage,
+	normalizeTavilyUsage,
+	type ExternalUsageProvider,
+	type ExternalUsageSnapshot,
+} from "./shared/usage-api.ts";
 
 type UsageWindowName = "session" | "week";
 type UsageStatus = "ok" | "estimated" | "unavailable" | "partial" | "stale";
@@ -44,10 +51,15 @@ type NormalizedRateWindow = {
 const CACHE_TTL_MS = Number(process.env.PI_CODEX_USAGE_STATUS_TTL_SECONDS ?? process.env.PI_CODEX_USAGE_CACHE_TTL_SECONDS ?? 300) * 1000;
 const POLL_MS = Number(process.env.PI_CODEX_USAGE_STATUS_POLL_SECONDS ?? 300) * 1000;
 const DEFAULT_WHAM_URL = "https://chatgpt.com/backend-api/wham/usage";
+const DEFAULT_TAVILY_USAGE_URL = "https://api.tavily.com/usage";
+const DEFAULT_FIRECRAWL_USAGE_URL = "https://api.firecrawl.dev/v2/team/credit-usage";
+const EXTERNAL_USAGE_TIMEOUT_MS = Number(process.env.PI_EXTERNAL_USAGE_TIMEOUT_MS ?? 15000);
 const JWT_CLAIM_PATH = "https://api.openai.com/auth";
 
 let cache: { at: number; snapshot: CodexUsageSnapshot } | undefined;
+const externalCache: Partial<Record<ExternalUsageProvider, { at: number; snapshot: ExternalUsageSnapshot }>> = {};
 let currentSnapshot: CodexUsageSnapshot | undefined;
+let currentExternalSnapshots: Partial<Record<ExternalUsageProvider, ExternalUsageSnapshot>> = {};
 let lastCtx: ExtensionContext | undefined;
 let pollTimer: NodeJS.Timeout | undefined;
 let refreshInFlight: Promise<void> | undefined;
@@ -168,6 +180,24 @@ export function renderUsageLines(ctx: ExtensionContext, snapshot: CodexUsageSnap
 	});
 }
 
+export function renderExternalUsageLine(provider: ExternalUsageProvider, snapshot: ExternalUsageSnapshot | undefined): string {
+	const label = provider === "tavily" ? "Tavily" : "Firecrawl";
+	if (!snapshot) return `${label} credits: refreshing usage…`;
+	if (snapshot.status === "unavailable") {
+		return `${label} credits: ${snapshot.warning === "API key not configured" ? "not configured" : "usage unavailable"}`;
+	}
+	const stale = snapshot.status === "stale" ? " · stale" : "";
+	const plan = snapshot.plan ? ` · ${snapshot.plan}` : "";
+	const reset = snapshot.resetAt ? ` · resets ${new Date(snapshot.resetAt).toLocaleString()}` : "";
+	if (snapshot.used === undefined) return `${label} credits: usage unavailable${stale}`;
+	if (snapshot.limit === undefined || snapshot.limit <= 0) {
+		return `${label} credits: ${formatTokens(snapshot.used)} used · limit unavailable${plan}${stale}`;
+	}
+	const percent = Math.max(0, Math.min(100, (snapshot.used / snapshot.limit) * 100));
+	const remaining = snapshot.remaining ?? Math.max(0, snapshot.limit - snapshot.used);
+	return `${label} credits [${bar(percent)}] ${Math.round(percent)}% used · ${formatTokens(snapshot.used)}/${formatTokens(snapshot.limit)} · ${formatTokens(remaining)} left${plan}${reset}${stale}`;
+}
+
 function installCustomFooter(ctx: ExtensionContext) {
 	ctx.ui.setStatus("usage-context", undefined);
 	ctx.ui.setStatus("usage-session", undefined);
@@ -186,6 +216,10 @@ function installCustomFooter(ctx: ExtensionContext) {
 				const lines = renderBuiltinishFooter(activeCtx, theme, footerData, width);
 				lines.push(theme.fg("dim", truncateToWidth(renderContext(activeCtx), width, theme.fg("dim", "..."))));
 				for (const usageLine of renderUsageLines(activeCtx, currentSnapshot)) {
+					lines.push(theme.fg("dim", truncateToWidth(usageLine, width, theme.fg("dim", "..."))));
+				}
+				for (const provider of ["tavily", "firecrawl"] as const) {
+					const usageLine = renderExternalUsageLine(provider, currentExternalSnapshots[provider]);
 					lines.push(theme.fg("dim", truncateToWidth(usageLine, width, theme.fg("dim", "..."))));
 				}
 				return lines;
@@ -226,6 +260,43 @@ async function getSnapshot(ctx: ExtensionContext, refresh = false): Promise<Code
 	} catch (error) {
 		if (cache) return { ...cache.snapshot, warnings: [...cache.snapshot.warnings, `stale: ${error instanceof Error ? error.message : String(error)}`] };
 		return { dataSource: "unavailable", lastUpdated: new Date().toISOString(), windows: [], warnings: [error instanceof Error ? error.message : String(error)] };
+	}
+}
+
+async function fetchExternalUsage(provider: ExternalUsageProvider): Promise<ExternalUsageSnapshot> {
+	const keyName = provider === "tavily" ? "TAVILY_API_KEY" : "FIRECRAWL_API_KEY";
+	const apiKey = getEnv(keyName);
+	if (!apiKey) return { provider, status: "unavailable", warning: "API key not configured" };
+	const url = provider === "tavily"
+		? getEnv("TAVILY_USAGE_URL") ?? DEFAULT_TAVILY_USAGE_URL
+		: getEnv("FIRECRAWL_USAGE_URL") ?? DEFAULT_FIRECRAWL_USAGE_URL;
+	const headers: Record<string, string> = { Accept: "application/json", Authorization: `Bearer ${apiKey}` };
+	const projectId = provider === "tavily" ? getEnv("TAVILY_PROJECT_ID") : undefined;
+	if (projectId) headers["X-Project-ID"] = projectId;
+	const controller = new AbortController();
+	const timeout = setTimeout(() => controller.abort(), EXTERNAL_USAGE_TIMEOUT_MS);
+	try {
+		const response = await fetch(url, { method: "GET", headers, signal: controller.signal, cache: "no-store" });
+		const text = await response.text();
+		if (!response.ok) throw new Error(`${provider} usage HTTP ${response.status}: ${text.slice(0, 160)}`);
+		const raw = text ? JSON.parse(text) : {};
+		return provider === "tavily" ? normalizeTavilyUsage(raw) : normalizeFirecrawlUsage(raw);
+	} finally {
+		clearTimeout(timeout);
+	}
+}
+
+async function getExternalSnapshot(provider: ExternalUsageProvider, refresh = false): Promise<ExternalUsageSnapshot> {
+	const cached = externalCache[provider];
+	if (!refresh && cached && Date.now() - cached.at < CACHE_TTL_MS) return cached.snapshot;
+	try {
+		const snapshot = await fetchExternalUsage(provider);
+		if (snapshot.status === "ok") externalCache[provider] = { at: Date.now(), snapshot };
+		return snapshot;
+	} catch (error) {
+		const warning = error instanceof Error ? error.message : String(error);
+		if (cached) return { ...cached.snapshot, status: "stale", warning };
+		return { provider, status: "unavailable", warning };
 	}
 }
 
@@ -282,7 +353,13 @@ function toFiniteNumber(value: unknown): number | undefined {
 
 async function updateStatus(ctx: ExtensionContext, refresh = false) {
 	lastCtx = ctx;
-	currentSnapshot = await getSnapshot(ctx, refresh);
+	const [codex, tavily, firecrawl] = await Promise.all([
+		getSnapshot(ctx, refresh),
+		getExternalSnapshot("tavily", refresh),
+		getExternalSnapshot("firecrawl", refresh),
+	]);
+	currentSnapshot = codex;
+	currentExternalSnapshots = { tavily, firecrawl };
 	requestFooterRender?.();
 }
 
@@ -298,6 +375,10 @@ export default function usageStatusline(pi: ExtensionAPI) {
 		lastCtx = ctx;
 		currentThinkingLevel = getThinkingLevel(ctx);
 		currentSnapshot = cache?.snapshot;
+		currentExternalSnapshots = {
+			tavily: externalCache.tavily?.snapshot,
+			firecrawl: externalCache.firecrawl?.snapshot,
+		};
 		installCustomFooter(ctx);
 		scheduleRefresh(ctx, true);
 		if (!pollTimer && POLL_MS > 0) pollTimer = setInterval(() => { if (lastCtx) scheduleRefresh(lastCtx, true); }, POLL_MS);
@@ -318,11 +399,12 @@ export default function usageStatusline(pi: ExtensionAPI) {
 		pollTimer = undefined;
 		lastCtx = undefined;
 		currentThinkingLevel = undefined;
+		currentExternalSnapshots = {};
 		requestFooterRender = undefined;
 	});
 
 	pi.registerCommand("usage-refresh", {
-		description: "Force refresh Codex usage footer status",
+		description: "Force refresh GPT, Tavily, and Firecrawl usage footer status",
 		handler: async (_args, ctx) => {
 			await updateStatus(ctx as unknown as ExtensionContext, true);
 			ctx.ui.notify("Usage status refreshed", "info");
