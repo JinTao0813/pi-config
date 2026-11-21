@@ -75,6 +75,30 @@ Closes #<implementation-ticket>
 
 Include `## Source` only when a source exists. Report failed or unavailable verification plainly. Use a temporary body file outside the worktree and remove it after publication.
 
+Use this as a reference for the expected specificity and level of detail:
+
+```markdown
+## Summary
+
+The homepage read the fabricated Collections the prototype shipped with. It now reads the Jobs Welvin promoted, showing at most four cards whose visual and destination both come from one selected Homepage Media Asset.
+
+## Changes
+
+### Portfolio Read Module
+
+- `homepageJobs()` returns the newest four Jobs marked for the homepage whose Homepage Media is ready and owned by the Job. Invalid selections are dropped before the limit is applied, so one cannot consume a card slot.
+- Ownership is re-checked here rather than trusted to the collection hook and database trigger that wrote it, because this module alone decides what a visitor sees.
+- Each card's `href` is derived from the selected media's kind instead of stored. An image opens `/photos/[jobSlug]`, a video opens `/videos/[jobSlug]`, so no destination field can drift from the media.
+
+### Homepage
+
+- The four-card row from the prototype returns with real content as `HomepageJobs`, replacing the unmounted `FeaturedCollections` that read mock data.
+- The hero slideshow cycles the same four selections instead of mock Collection covers.
+- `PublicMediaImage` serves a photo's published sizes as a `srcset`, or a video's generated poster. A video's playback file is never referenced, so the homepage downloads no video.
+- The page is read per request, matching `/photos` and `/videos`, since promoting a Job publishes it immediately.
+- Clients and Recent Reels stay on mock data until Manage homepage Clients and Site Settings #12 and Publish curated Recent Reels #13.
+```
+
 **Complete when:** every title and body claim is supported by the source, diff, or recorded command output.
 
 ### 4. Publish idempotently
